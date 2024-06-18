@@ -85,26 +85,28 @@ class ComputerEnumerator(MembershipEnumerator):
             thread.daemon = True
             thread.start()
 
-        for _, computer in iteritems(computers):
-            if not 'attributes' in computer:
+       for _, computer in iteritems(computers):
+            if 'attributes' not in computer:
                 continue
-
-            # if 'dNSHostName' not in computer['attributes']:
-            #     continue
 
             hostname = ADUtils.get_entry_property(computer, 'dNSHostName')
             samname = computer['attributes']['sAMAccountName']
+    
             if not hostname:
                 logging.debug('Invalid computer object without hostname: %s', samname)
                 hostname = ''
+    
+    # Check blocklist and allowlist
+    if hostname in self.blocklist:
+        logging.info('Skipping computer: %s (blocklisted)', hostname)
+        continue
 
-            # Check if filtering
-            if hostname in self.blocklist:
-                logging.info('Skipping computer: %s (blocklisted)', hostname)
-                continue
-            if len(self.allowlist) > 0 and hostname.lower() not in self.allowlist:
-                logging.debug('Skipping computer: %s (not allowlisted)', hostname)
-                continue
+    if self.allowlist and hostname.lower() not in self.allowlist:
+        logging.debug('Skipping computer: %s (not allowlisted)', hostname)
+        continue
+
+    process_queue.put((hostname, samname, computer))
+
 
             process_queue.put((hostname, samname, computer))
         process_queue.join()
@@ -119,12 +121,8 @@ class ComputerEnumerator(MembershipEnumerator):
         c = ADComputer(hostname=hostname, samname=samname, ad=self.addomain, addc=self.addc, objectsid=objectsid)
         c.primarygroup = self.get_primary_membership(entry)
         if hostname and (not self.exclude_dcs or not ADUtils.is_dc(entry)) and c.try_connect():
-            try:
-
-                if 'session' in self.collect:
-                    sessions = c.rpc_get_sessions()
-                else:
-                    sessions = []
+             try:
+                    sessions = c.rpc_get_sessions() if 'session' in self.collect else []
                 if 'localadmin' in self.collect:
                     unresolved = c.rpc_get_group_members(544, c.admins)
                     c.rpc_resolve_sids(unresolved, c.admins)
@@ -263,20 +261,19 @@ class ComputerEnumerator(MembershipEnumerator):
                 results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
 
 
-            except DCERPCException:
-                logging.debug(traceback.format_exc())
-                logging.warning('Querying computer failed: %s', hostname)
-            except Exception as e:
-                logging.error('Unhandled exception in computer %s processing: %s', hostname, str(e))
-                logging.info(traceback.format_exc())
-        else:
-            c.permanentfailure = True
-            # Write the info we have to the file regardless
-            try:
-                results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
-            except Exception as e:
-                logging.error('Unhandled exception in computer %s processing: %s', hostname, str(e))
-                logging.info(traceback.format_exc())
+    except DCERPCException as ex:
+        logging.debug(traceback.format_exc())
+        logging.warning('Querying computer failed: %s', hostname)
+    except Exception as ex:
+        logging.error('Unhandled exception in computer %s processing: %s', hostname, str(ex))
+        logging.info(traceback.format_exc())
+else:
+    c.permanentfailure = True
+    try:
+        results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
+    except Exception as ex:
+        logging.error('Unhandled exception in computer %s processing: %s', hostname, str(ex))
+        logging.info(traceback.format_exc())
 
     def work(self, process_queue, results_q):
         """
@@ -284,9 +281,10 @@ class ComputerEnumerator(MembershipEnumerator):
         """
         logging.debug('Start working')
 
-        while True:
-            hostname, samname, entry = process_queue.get()
-            objectsid = entry['attributes']['objectSid']
-            logging.info('Querying computer: %s', hostname)
-            self.process_computer(hostname, samname, objectsid, entry, results_q)
-            process_queue.task_done()
+while True:
+    hostname, samname, entry = process_queue.get()
+    objectsid = entry['attributes']['objectSid']
+    logging.info('Querying computer: %s', hostname)
+    self.process_computer(hostname, samname, objectsid, entry, results_q)
+    process_queue.task_done()
+
