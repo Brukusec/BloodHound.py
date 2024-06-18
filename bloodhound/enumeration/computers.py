@@ -33,36 +33,19 @@ from bloodhound.enumeration.memberships import MembershipEnumerator
 from bloodhound.ad.computer import ADComputer
 from bloodhound.ad.utils import ADUtils
 from future.utils import itervalues, iteritems, native_str
+from bloodhound.ldap_pool import LDAPConnectionPool
 
 class ComputerEnumerator(MembershipEnumerator):
-    """
-    Class to enumerate computers in the domain.
-    Contains the threading logic and workers which will call the collection
-    methods from the bloodhound.ad module.
-
-    This class extends the MembershipEnumerator class just to inherit the
-    membership lookup functions which are also needed for computers.
-    """
     def __init__(self, addomain, addc, collect, do_gc_lookup=True, computerfile="", exclude_dcs=False):
-        """
-        Computer enumeration. Enumerates all computers in the given domain.
-        Every domain enumerated will get its own instance of this class.
-        """
-        self.addomain = addomain
-        self.addc = addc
-        # blocklist and allowlist are only used for debugging purposes
-        self.blocklist = []
-        self.allowlist = []
+        super().__init__(addomain, addc, collect, disable_pooling=False)
         self.do_gc_lookup = do_gc_lookup
-        # Store collection methods specified
-        self.collect = collect
         self.exclude_dcs = exclude_dcs
         if computerfile:
             logging.info('Limiting enumeration to FQDNs in %s', computerfile)
             with codecs.open(computerfile, 'r', 'utf-8') as cfile:
                 for line in cfile:
                     self.allowlist.append(line.strip().lower())
-
+                    
     def enumerate_computers(self, computers, num_workers=10, timestamp="", fileNamePrefix=""):
         """
             Enumerates the computers in the domain. Is threaded, you can specify the number of workers.
@@ -280,7 +263,7 @@ class ComputerEnumerator(MembershipEnumerator):
 #            Work function, will obtain work from the given queue and will push results on the results_q.
 #        """
 #        logging.debug('Start working')
-
+results_q.put(('computer', c.get_bloodhound_data(entry, self.collect)))
 while True:
     hostname, samname, entry = process_queue.get()
     objectsid = entry['attributes']['objectSid']
