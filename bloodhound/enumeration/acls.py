@@ -63,10 +63,10 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
     if osid not in ignoresids:
         relations.append(build_relation(osid, 'Owns', inherited=False))
     for ace_object in sd.dacl.aces:
-        if ace_object.ace.AceType != 0x05 and ace_object.ace.AceType != 0x00:
-            # These are the only two aces we care about currently
-            logging.debug('Don\'t care about acetype %d', ace_object.ace.AceType)
+        if ace_object.ace.AceType not in {0x05, 0x00}:
+            logging.debug('Ignoring acetype %d', ace_object.ace.AceType)
             continue
+
         # Check if sid is ignored
         sid = str(ace_object.acedata.sid)
         # Ignore Creator Owner or Local System
@@ -229,51 +229,26 @@ def parse_binary_acl(entry, entrytype, acl, objecttype_guid_map):
     return entry, relations
 
 def can_write_property(ace_object, binproperty):
-    '''
-    Checks if the access is sufficient to write to a specific property.
-    This can either be because we have the right ADS_RIGHT_DS_WRITE_PROP and the correct GUID
-    is set in ObjectType, or if we have the ADS_RIGHT_DS_WRITE_PROP right and the ObjectType
-    is empty, in which case we can write to any property. This is documented in
-    [MS-ADTS] section 5.1.3.2: https://msdn.microsoft.com/en-us/library/cc223511.aspx
-    '''
-    if not ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_WRITE_PROP):
-        return False
-    if not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
-        # No ObjectType present - we have generic access on all properties
-        return True
-    # Both are binary here
-    if ace_object.acedata.data.ObjectType == binproperty:
+    write_prop_priv = ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_WRITE_PROP)
+    object_type_present = ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT)
+    
+    if write_prop_priv and (not object_type_present or ace_object.acedata.data.ObjectType == binproperty):
         return True
     return False
+
 
 def has_extended_right(ace_object, binrightguid):
-    '''
-    Checks if the access is sufficient to control the right with the given GUID.
-    This can either be because we have the right ADS_RIGHT_DS_CONTROL_ACCESS and the correct GUID
-    is set in ObjectType, or if we have the ADS_RIGHT_DS_CONTROL_ACCESS right and the ObjectType
-    is empty, in which case we have all extended rights. This is documented in
-    [MS-ADTS] section 5.1.3.2: https://msdn.microsoft.com/en-us/library/cc223511.aspx
-    '''
-    if not ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS):
-        return False
-    if not ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT):
-        # No ObjectType present - we have all extended rights
-        return True
-    # Both are binary here
-    if ace_object.acedata.data.ObjectType == binrightguid:
+    control_access_priv = ace_object.acedata.mask.has_priv(ACCESS_MASK.ADS_RIGHT_DS_CONTROL_ACCESS)
+    object_type_present = ace_object.acedata.has_flag(ACCESS_ALLOWED_OBJECT_ACE.ACE_OBJECT_TYPE_PRESENT)
+    
+    if control_access_priv and (not object_type_present or ace_object.acedata.data.ObjectType == binrightguid):
         return True
     return False
 
+
 def ace_applies(ace_guid, object_class, objecttype_guid_map):
-    '''
-    Checks if an ACE applies to this object (based on object classes).
-    Note that this function assumes you already verified that InheritedObjectType is set (via the flag).
-    If this is not set, the ACE applies to all object types.
-    '''
-    if ace_guid == objecttype_guid_map[object_class]:
-        return True
-    # If none of these match, the ACE does not apply to this object
-    return False
+    return ace_guid == objecttype_guid_map.get(object_class)
+
 
 def build_relation(sid, relation, acetype='', inherited=False):
     if acetype != '':
