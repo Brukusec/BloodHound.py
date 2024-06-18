@@ -45,43 +45,29 @@ class DomainEnumerator(object):
         self.addc = addc
 
     def dump_domain(self, collect, timestamp="", filename='domains.json', fileNamePrefix=""):
-        if (fileNamePrefix != None):
-            filename = fileNamePrefix + "_" + timestamp + filename
-        else:
-            filename = timestamp + filename
-        """
-        Dump trusts. This is currently the only domain info we support, so
-        this function handles the entire domain dumping.
-        """
-        if 'trusts' in collect:
-            entries = self.addc.get_trusts()
-        else:
-            entries = []
-
-        try:
-            logging.debug('Opening file for writing: %s' % filename)
-            out = codecs.open(filename, 'w', 'utf-8')
-        except:
-            logging.warning('Could not write file: %s' % filename)
-            return
+    filename = f"{fileNamePrefix}_{timestamp}{filename}" if fileNamePrefix else f"{timestamp}{filename}"
+    
+    entries = self.addc.get_trusts() if 'trusts' in collect else []
+    
+    try:
+        logging.debug('Opening file for writing: %s', filename)
+        out = codecs.open(filename, 'w', 'utf-8')
+    except Exception:
+        logging.warning('Could not write file: %s', filename)
+        return
 
         # If the logging level is DEBUG, we ident the objects
-        if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
-            indent_level = 1
-        else:
-            indent_level = None
+indent_level = 1 if logging.getLogger().getEffectiveLevel() == logging.DEBUG else None
+
 
         # Todo: fix this properly. Current code is quick fix to work with domains
         # that have custom casing in their DN
-        domain_object = None
-        for domain in self.addomain.domains.keys():
-            if domain.lower() == self.addomain.baseDN.lower():
-                domain_object = self.addomain.domains[domain]
-                break
+domain_object = next((self.addomain.domains[domain] for domain in self.addomain.domains.keys() if domain.lower() == self.addomain.baseDN.lower()), None)
 
-        if not domain_object:
-            logging.error('Could not find domain object. Aborting domain enumeration')
-            return
+if not domain_object:
+    logging.error('Could not find domain object. Aborting domain enumeration')
+    return
+
 
         # Initialize json structure
         datastruct = {
