@@ -31,6 +31,7 @@ from bloodhound.ad.computer import ADComputer
 from bloodhound.ad.structures import LDAP_SID
 from bloodhound.enumeration.acls import AclEnumerator, parse_binary_acl
 from bloodhound.enumeration.outputworker import OutputWorker
+from bloodhound.ldap_pool import LDAPConnectionPool
 
 class MembershipEnumerator(object):
     """
@@ -39,18 +40,21 @@ class MembershipEnumerator(object):
     methods from the bloodhound.ad module.
     """
     def __init__(self, addomain, addc, collect, disable_pooling):
-        """
-        Membership enumeration. Enumerates all groups/users/other memberships.
-        """
         self.addomain = addomain
         self.addc = addc
-        # Store collection methods specified
         self.collect = collect
         self.disable_pooling = disable_pooling
         self.aclenumerator = AclEnumerator(addomain, addc, collect)
         self.aceresolver = AceResolver(addomain, addomain.objectresolver)
         self.result_q = None
+        self.ldap_pool = LDAPConnectionPool(addc.server.address, addc.username, addc.password)
 
+    def get_ldap_connection(self):
+        return self.ldap_pool.get_connection()
+
+    def release_ldap_connection(self, conn):
+        self.ldap_pool.release_connection(conn)
+        
     def get_membership(self, member):
         """
         Attempt to resolve the membership (DN) of a group to an object
@@ -120,15 +124,12 @@ class MembershipEnumerator(object):
         props['sfupassword'] = None
 
     def enumerate_users(self, timestamp="", fileNamePrefix=""):
-        if (fileNamePrefix != None):
-            filename = fileNamePrefix + "_" + timestamp + 'users.json'
-        else:
-            filename = timestamp + 'users.json'
-
-        # Should we include extra properties in the query?
+        filename = f"{fileNamePrefix}_{timestamp}users.json" if fileNamePrefix else f"{timestamp}users.json"
         with_properties = 'objectprops' in self.collect
         acl = 'acl' in self.collect
-        entries = self.addc.get_users(include_properties=with_properties, acl=acl)
+        conn = self.get_ldap_connection()
+        entries = self.addc.get_users(connection=conn, include_properties=with_properties, acl=acl)
+        self.release_ldap_connection(conn)
 
         logging.debug('Writing users to file: %s', filename)
 
