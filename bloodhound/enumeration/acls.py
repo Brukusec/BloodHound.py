@@ -28,6 +28,7 @@ from impacket.uuid import string_to_bin, bin_to_string
 from bloodhound.lib import cstruct
 from io import BytesIO
 from future.utils import iteritems, native_str
+from bloodhound.ldap_pool import LDAPConnectionPool
 
 # Extended rights and property GUID mapping, converted to binary so we don't have to do this
 # for every comparison.
@@ -259,15 +260,20 @@ class AclEnumerator(object):
     """
     Helper class for ACL parsing.
     """
-    def __init__(self, addomain, addc, collect):
+def __init__(self, addomain, addc, collect):
         self.addomain = addomain
         self.addc = addc
-        # Store collection methods specified
         self.collect = collect
         self.pool = None
+        self.ldap_pool = LDAPConnectionPool(addc.server.address, addc.username, addc.password)
 
     def init_pool(self):
         self.pool = Pool()
+        
+    def parse_binary_acl(self, entry, entrytype, acl, objecttype_guid_map):
+        conn = self.ldap_pool.get_connection()
+        # Processo de ACL usando a conexão LDAP
+        self.ldap_pool.release_connection(conn)
 
 """
 The following is Security Descriptor parsing using cstruct
